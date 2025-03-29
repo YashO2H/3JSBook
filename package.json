@@ -13,6 +13,7 @@
     "@react-three/fiber": "^8.18.0",
     "@types/three": "^0.154.0",
     "autoprefixer": "^10.4.19",
+    "gsap": "^3.12.7",
     "jotai": "^2.8.4",
     "leva": "^0.9.35",
     "maath": "^0.10.8",

@@ -77,7 +77,6 @@ const pageGeometry = createPageGeometry(PAGE_DEPTH, false);
 const coverGeometry = createPageGeometry(PAGE_DEPTH, false);
 const whiteColor = new Color("white");
 const emissiveColor = new Color("orange");
-const coverColor = new Color("#e8dbc5"); 
 
 // Preload textures function (to be called within a component)
 const preloadTextures = () => {
@@ -90,122 +89,37 @@ const preloadTextures = () => {
   });
 };
 
-export const Spine = ({ totalPage, page }) => {
-  // Calculate spine dimensions exactly as before
-  const SPINE_WIDTH = PAGE_DEPTH * (totalPage); // Do not change this value!
+// Add the spine geometry to your book group
+const Spine = ({totalPage, page}) => {
+  // Spine Geometry Dimensions (Custom size for better control)
+  const SPINE_WIDTH = 0.003 * (totalPage - page); // Slightly thicker for a realistic look
   const SPINE_HEIGHT = PAGE_HEIGHT;
   const SPINE_DEPTH = PAGE_DEPTH;
-  
-  // We want to divide the spine into segments equal to totalPage
-  const spineSegments = totalPage;
-  
-  // Create the box geometry for the spine with custom segments along the width.
-  // (We use spineSegments along the "width" axis to have a similar bending approach.)
-  const spineGeometry = new BoxGeometry(
-    SPINE_WIDTH,
-    SPINE_HEIGHT,
-    SPINE_DEPTH,
-    spineSegments,  // segments along width
-    2,              // vertical segments (as before)
-  );
-  
-  // Translate geometry so that its “left” side is at x = 0 (as with your page geometry)
-  spineGeometry.translate(0, 0, 0);
-  
-  // Setup UVs here if you need to adjust them (omitted for brevity)
-  
-  // Create custom skin indices and weights per vertex (similar to your page setup)
-  const position = spineGeometry.attributes.position;
-  const vertex = new Vector3();
-  const skinIndices = [];
-  const skinWeights = [];
-  const SEGMENT_WIDTH_SPINE = SPINE_WIDTH / spineSegments;
-  
-  for (let i = 0; i < position.count; i++) {
-    vertex.fromBufferAttribute(position, i);
-    const x = vertex.x;
-    const skinIndex = Math.max(0, Math.floor(x / SEGMENT_WIDTH_SPINE));
-    // Compute blending between two adjacent bones
-    let skinWeight = (x % SEGMENT_WIDTH_SPINE) / SEGMENT_WIDTH_SPINE;
-    
-    skinIndices.push(skinIndex, skinIndex + 1, 0, 0);
-    skinWeights.push(1 - skinWeight, skinWeight, 0, 0);
-  }
-  
-  spineGeometry.setAttribute("skinIndex", new Uint16BufferAttribute(skinIndices, 4));
-  spineGeometry.setAttribute("skinWeight", new Float32BufferAttribute(skinWeights, 4));
-  
-  // Create a bone hierarchy for the spine. We create (spineSegments+1) bones.
-  const bones = [];
-  for (let i = 0; i <= spineSegments; i++) {
-    const bone = new Bone();
-    bones.push(bone);
-    if (i === 0) {
-      bone.position.x = 0;
-    } else {
-      bone.position.x = SEGMENT_WIDTH_SPINE; // each bone advances by one segment
-      bones[i - 1].add(bone); // attach current bone to the previous one
-    }
-  }
-  
-  const skeleton = new Skeleton(bones);
-  
-  // Load and set up the spine texture (keep your original settings)
-  const spineTexture = useLoader(TextureLoader, `/textures/DSC02069.jpg`);
-  spineTexture.colorSpace = SRGBColorSpace;
-  spineTexture.wrapS = THREE.ClampToEdgeWrapping;
-  spineTexture.wrapT = THREE.ClampToEdgeWrapping;
-  spineTexture.repeat.set(1, 1);
-  spineTexture.offset.set(0, 0);
-  
-  const spineMaterial = new MeshStandardMaterial({
-    map: spineTexture
-  });
-  
-  // Create the SkinnedMesh with the generated geometry and material
-  const spineMesh = useMemo(() => {
-    const mesh = new SkinnedMesh(spineGeometry, spineMaterial);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    // Add the root bone to the mesh and bind the skeleton
-    mesh.add(bones[0]);
-    mesh.bind(skeleton);
-    return mesh;
-  }, [spineGeometry, spineMaterial, skeleton, bones]);
-  
-  // In your animation loop, you can update the spine’s curvature.
-  // Here, we update each bone's rotation based on a target angle computed from the page.
-  useFrame(() => {
-    const normalizedPage = page / totalPage; // Normalize from 0 to 1
-  
-    bones.forEach((bone, i) => {
-      const factor = i / bones.length; // Progress along the spine
-  
-      let curveStrength;
-      if (normalizedPage <= 0.5) {
-        // Curve outward symmetrically from both ends until halfway
-        curveStrength = Math.sin(normalizedPage * Math.PI);
-      }
-  
-      // Apply rotation for the curve effect
-      bone.rotation.y = MathUtils.lerp(bone.rotation.y, curveStrength * factor * Math.PI * 0.5, 0.1);
-    });
-  });
-  
-  
-  return (
-    <primitive 
-      object={spineMesh}
-      position={[0, 0, -(totalPage) * PAGE_DEPTH / 2]}
-      rotation={[0, Math.PI / 2, 0]}
-    />
-  );
-};
 
+  // Separate Spine Geometry
+  const spineGeometry = new BoxGeometry(
+    SPINE_WIDTH,     // Width of the spine
+    SPINE_HEIGHT,    // Height (matches page height)
+    SPINE_DEPTH      // Thickness (matches page depth)
+  );
+
+  // Spine Texture Handling
+  const spineTexture = useLoader(TextureLoader, [`/textures/DSC02069.jpg`]);
+  spineTexture[0].colorSpace = SRGBColorSpace;
+  spineTexture[0].wrapS = THREE.ClampToEdgeWrapping;
+  spineTexture[0].wrapT = THREE.ClampToEdgeWrapping;
+  spineTexture[0].repeat.set(1, 1);  // Stretch to full width & height
+  spineTexture[0].offset.set(0, 0);  // Center the texture
+
+  const spineMaterial = new MeshStandardMaterial({
+    map: spineTexture[0]
+  });
+  return <mesh geometry={spineGeometry} material={spineMaterial} position={[0, 0, -(totalPage- page) * PAGE_DEPTH / 2]} rotation={[0, Math.PI/2, 0]}/>
+}
 
 
 const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
-  const isCover = number === 0 || number === (pages.length - 1);
+  const iscover = number === 0 || number === pages.length - 1;
   // Load textures inside the component
   const [picture, picture2, ...[pictureRoughness]] = useTexture([
     `/textures/${front}.jpg`,
@@ -216,11 +130,11 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
   picture.colorSpace = picture2.colorSpace = SRGBColorSpace;
 
   // Get the spine texture inside the component
-  // const spineTexture = useTexture(/textures/Red.jpg, undefined, (error) => {
+  // const spineTexture = useTexture(`/textures/Red.jpg`, undefined, (error) => {
   //   console.error("Spine texture error:", error);
   // });
 
-  // const spineTexture = useLoader(TextureLoader, [/textures/spine.jpg]);
+  // const spineTexture = useLoader(TextureLoader, [`/textures/spine.jpg`]);
   // spineTexture[0].colorSpace = SRGBColorSpace;
   // spineTexture[0].wrapS = THREE.ClampToEdgeWrapping;
   // spineTexture[0].wrapT = THREE.ClampToEdgeWrapping;
@@ -241,7 +155,7 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
   useCursor(highlighted);
 
   const pageMaterials = useMemo(() => [
-    new MeshStandardMaterial({ color: 'blue' }),  // Front material
+    new MeshStandardMaterial({ color: 'white' }),  // Front material
     // new MeshStandardMaterial({ 
     //     map: spineTexture[0],
     //     roughness: 0.8,
@@ -251,57 +165,41 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
     //       console.error("Error loading spine texture:", error);
     //     }
     //   }),
-    new MeshStandardMaterial({ color: 'blue' }),
-    new MeshStandardMaterial({ color: 'green' }),
-    new MeshStandardMaterial({ color: 'pink' }),
+    new MeshStandardMaterial({ color: 'white' }),
+    new MeshStandardMaterial({ color: 'white' }),
+    new MeshStandardMaterial({ color: 'white' }),
   ], []);
 
-   const manualSkinnedMesh = useMemo(() => {
-      const bones = [];
-  
-      for (let i = 0; i <= PAGE_SEGMENTS; i++) {
-        let bone = new Bone();
-        bones.push(bone);
-        if (i === 0) {
-          bone.position.x = 0;
-        } else {
-          bone.position.x = SEGMENT_WIDTH;
-        }
-  
-        if (i > 0) {
-          bones[i - 1].add(bone); // Attach new bone to the previous one
-        }
-      }
-  
-      const skeleton = new Skeleton(bones);
-      const selectedGeometry = isCover ? coverGeometry : pageGeometry;
-  
-      const materials = [...pageMaterials,
+  const manualSkinnedMesh = useMemo(() => {
+    const materials = [
+      ...pageMaterials,
       new MeshStandardMaterial({
-        color: isCover ? coverColor : whiteColor,
+        color: whiteColor,
         map: picture,
-        roughness: isCover ? 0.2 : 0.1,
+        ...(number === 0 ?
+          { roughnessMap: pictureRoughness } : { roughness: 0.1 }),
         emissive: emissiveColor,
         emissiveIntensity: 0
       }),
       new MeshStandardMaterial({
-        color: isCover ? coverColor : whiteColor,
+        color: whiteColor,
         map: picture2,
-        roughness: isCover ? 0.2 : 0.1,
+        ...(number === pages.length - 1 ? {
+          roughnessMap: pictureRoughness
+        } : { roughness: 0.1 }),
         emissive: emissiveColor,
         emissiveIntensity: 0
       })
-      ];
-  
-      const mesh = new SkinnedMesh(selectedGeometry, materials);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-  
-      mesh.add(skeleton.bones[0]);
-      mesh.bind(skeleton);
-      return mesh;
-    }, []);
+    ];
+
+    const selectedGeometry = (iscover) ? coverGeometry : pageGeometry;
+    const mesh = new Mesh(selectedGeometry, materials);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+
+    return mesh;
+  }, [picture, picture2, pictureRoughness, pageMaterials, number]);
 
   useFrame((_, delta) => {
     if (!skinnedMeshRef.current || !group.current) {
@@ -424,6 +322,7 @@ export const RigidBook = ({ ...props }) => {
     <group {...props}>
       <group>
         <Spine totalPage={pages.length} page={delayedPage}/>
+        <Spine totalPage={page} page={page - delayedPage}/>
         {[...pages].map((pageData, index) => (
           <Page
             key={index}

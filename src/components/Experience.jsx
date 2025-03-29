@@ -2,11 +2,15 @@ import { Environment, Float, OrbitControls } from "@react-three/drei";
 import { Book } from "./Book";
 import { RigidBook } from "./RigidBook";
 import { Canvas } from "@react-three/fiber";
+import { SpineBook } from "./WithoutSpineBook";
+import { SoftBook } from "./SoftBook";
 export const Experience = () => {
   return (
     <>
-        {/* <Book /> */}
-        <RigidBook />
+        <Book />
+        {/* <SpineBook /> */}
+        {/* <RigidBook /> */}
+        {/* <SoftBook /> */}
         <OrbitControls />
         <Environment preset="studio"></Environment>
         <directionalLight
