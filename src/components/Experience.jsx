@@ -2,14 +2,15 @@ import { Environment, Float, OrbitControls } from "@react-three/drei";
 import { Book } from "./Book";
 import { RigidBook } from "./RigidBook";
 import { Canvas } from "@react-three/fiber";
-import { SpineBook } from "./WithoutSpineBook";
+import { NoSpineBook } from "./WithoutSpineBook";
 import { SoftBook } from "./SoftBook";
+import { Physics } from "@react-three/cannon";
 export const Experience = () => {
   return (
     <>
-        <Book />
-        {/* <SpineBook /> */}
-        {/* <RigidBook /> */}
+        {/* <Book /> */}
+        {/* <NoSpineBook /> */}
+        <RigidBook />
         {/* <SoftBook /> */}
         <OrbitControls />
         <Environment preset="studio"></Environment>

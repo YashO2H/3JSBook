@@ -82,7 +82,7 @@ const preloadTextures = () => {
     pages.forEach((page) => {
         useTexture.preload(`/textures/${page.front}.jpg`);
         useTexture.preload(`/textures/${page.back}.jpg`);
-        useTexture.preload(`/textures/book-cover-roughness.jpg`);
+        useTexture.preload(`/textures/book-cover-roughness.png`);
     });
 };
 
@@ -100,7 +100,7 @@ const Page = ({
     const [picture, picture2, ..._rest] = useTexture([
         `/textures/${front}.jpg`,
         `/textures/${back}.jpg`,
-        ...(isCover ? [`/textures/book-cover-roughness.jpg`] : []),
+        ...(isCover ? [`/textures/book-cover-roughness.png`] : []),
     ]);
 
     picture.colorSpace = picture2.colorSpace = SRGBColorSpace;
@@ -196,11 +196,11 @@ const Page = ({
         let targetRotation = opened ? -Math.PI / 2 : Math.PI / 2;
 
         // If the book is not closed, adjust the rotation based on page index.
-        if (!bookClosed) {
+        // if (!bookClosed) {
             const middleIndex = (pages.length - 1) / 2;
             const offsetFromMiddle = number - middleIndex;
-            targetRotation += degToRad(offsetFromMiddle * 0.8);
-        }
+            targetRotation += degToRad(number * 0.2);
+        // }
 
         easing.dampAngle(group.current.rotation, "y", targetRotation, easingFactor, delta);
 
@@ -271,14 +271,14 @@ const Page = ({
             <primitive
                 ref={skinnedMeshRef}
                 object={manualSkinnedMesh}
-                position-z={-number * PAGE_DEPTH + page * PAGE_DEPTH}
+                // position-z={-number * PAGE_DEPTH + page * PAGE_DEPTH}
             />
 
         </group>
     );
 };
 
-export const SpineBook = ({ ...props }) => {
+export const NoSpineBook = ({ ...props }) => {
     const [page] = useAtom(pageAtom)
     const [delayedPage, setDelayedPage] = useState(page);
 

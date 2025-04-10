@@ -8,7 +8,7 @@ import { useFrame, useLoader } from "@react-three/fiber";
 import { degToRad } from "three/src/math/MathUtils.js";
 import { easing } from "maath";
 
-const easingFactor = 0.5; //Control the page of easing
+const easingFactor = 0.05; //Control the page of easing
 const easingFactorFold = 0.3
 const insideCurveStrength = 0.18;
 const outsideCurveStrength = 0.05;
@@ -16,67 +16,53 @@ const turningCurveStrength = 0.09;
 const PAGE_WIDTH = 1.28;
 const PAGE_HEIGHT = 1.71; //4:3 aspect ratio
 const PAGE_DEPTH = 0.003;
-const COVER_DEPTH = 0.009; 
+const COVER_DEPTH = 0.009;
 const PAGE_SEGMENTS = 30; // Divides the page for smoother bending
-const SEGMENT_WIDTH = PAGE_WIDTH / PAGE_SEGMENTS;
+const RATIO = 1.05;
+const SEGMENT_WIDTH = PAGE_WIDTH * RATIO / PAGE_SEGMENTS;
 const PAGE_TURN_DURATION = 1.0; // Animation duration in seconds
+const COVER_EXTENSION = 0.05;
 
 // Create the geometry outside the component since it doesn't depend on props or state
 const createPageGeometry = (depth = PAGE_DEPTH, isCover) => {
-  const width = isCover ? PAGE_WIDTH * 1.05 : PAGE_WIDTH;
-  const height = isCover ? PAGE_HEIGHT * 1.05 :PAGE_HEIGHT;
-  const geometry = new BoxGeometry(
+  const width = isCover ? PAGE_WIDTH * RATIO + COVER_EXTENSION : PAGE_WIDTH;
+  const height = isCover ? PAGE_HEIGHT * RATIO + COVER_EXTENSION: PAGE_HEIGHT;
+  const pageGeometry = new BoxGeometry(
     width,
-    height,   // Height
-    depth,    // Thickness
-    PAGE_SEGMENTS,  // Horizontal segments for smooth deformation
-    2               // Only 2 vertical segments are enough
+    height,
+    depth,
+    PAGE_SEGMENTS,
+    2
   );
 
-  geometry.translate(width / 2, 0, 0);
+  pageGeometry.translate(width / 2, 0, 0);
 
-  const uvs = geometry.attributes.uv.array;
-
-  // Corrected Left Face (Spine) - Indices 16-23
-  for (let i = 16; i < 24; i += 2) {
-    uvs[i] = uvs[i] * 1;      // Map full width
-    uvs[i + 1] = uvs[i + 1] * (PAGE_HEIGHT / PAGE_WIDTH);  // Scale for aspect ratio
-  }
-
-  geometry.attributes.uv.needsUpdate = true;
-
-
-  const position = geometry.attributes.position; // Access the page's vertex positions
-  const vertex = new Vector3();  // Temporary vector to hold vertex data
-  const skinIndexes = [];       // Tracks which bones affect each vertex
-  const skinWeights = [];       // Tracks how strongly each bone affects the vertex
+  const position = pageGeometry.attributes.position;
+  const vertex = new Vector3();
+  const skinIndexes = [];
+  const skinWeights = [];
 
   for (let i = 0; i < position.count; i++) {
-    // All VERTICES
-    vertex.fromBufferAttribute(position, i); // Get the vertex
-    const x = vertex.x; // Get the x position of the vertex
-
-    // Determine which bone controls this vertex
+    vertex.fromBufferAttribute(position, i);
+    const x = vertex.x;
     const skinIndex = Math.max(0, Math.floor(x / SEGMENT_WIDTH));
-
-    // Calculate how much influence each bone has (blending effect)
     let skinWeight = (x % SEGMENT_WIDTH) / SEGMENT_WIDTH;
 
-    // Assign two bones to each vertex for smooth bending
     skinIndexes.push(skinIndex, skinIndex + 1, 0, 0);
     skinWeights.push(1 - skinWeight, skinWeight, 0, 0);
   }
 
-  geometry.setAttribute("skinIndex", new Uint16BufferAttribute(skinIndexes, 4));
-  geometry.setAttribute("skinWeight", new Float32BufferAttribute(skinWeights, 4));
+  pageGeometry.setAttribute("skinIndex", new Uint16BufferAttribute(skinIndexes, 4));
+  pageGeometry.setAttribute("skinWeight", new Float32BufferAttribute(skinWeights, 4));
 
-  return geometry;
-};
+  return pageGeometry;
+}
 
 const pageGeometry = createPageGeometry(PAGE_DEPTH, false);
-const coverGeometry = createPageGeometry(PAGE_DEPTH, false);
+const coverGeometry = createPageGeometry(COVER_DEPTH, true);
 const whiteColor = new Color("white");
 const emissiveColor = new Color("orange");
+const coverColor = new Color("#e8dbc5");
 
 // Preload textures function (to be called within a component)
 const preloadTextures = () => {
@@ -85,63 +71,281 @@ const preloadTextures = () => {
   pages.forEach((page) => {
     useTexture.preload(`/textures/${page.front}.jpg`);
     useTexture.preload(`/textures/${page.back}.jpg`);
-    useTexture.preload(`/textures/book-cover-roughness.jpg`);
+    useTexture.preload(`/textures/book-cover-roughness.png`);
   });
 };
 
-// Add the spine geometry to your book group
-const Spine = ({totalPage, page}) => {
-  // Spine Geometry Dimensions (Custom size for better control)
-  const SPINE_WIDTH = 0.003 * (totalPage - page); // Slightly thicker for a realistic look
-  const SPINE_HEIGHT = PAGE_HEIGHT;
-  const SPINE_DEPTH = PAGE_DEPTH;
+// Spine component as a separate mesh
+const SpineFolded = ({ totalPages, currentPage, bookClosed }) => {
+  const spineMainRef = useRef();
+  const spineLeftFoldRef = useRef();
+  const spineRightFoldRef = useRef();
+  const spineGroupRef = useRef();
 
-  // Separate Spine Geometry
-  const spineGeometry = new BoxGeometry(
-    SPINE_WIDTH,     // Width of the spine
-    SPINE_HEIGHT,    // Height (matches page height)
-    SPINE_DEPTH      // Thickness (matches page depth)
+  const SPINE_HEIGHT = PAGE_HEIGHT* RATIO + COVER_EXTENSION ;
+  const SPINE_DEPTH = COVER_DEPTH;                  // visible spine thickness
+  const SPINE_WIDTH = PAGE_DEPTH * (totalPages - 2); // page‑stack thickness
+  const FOLD_WIDTH = SPINE_WIDTH * 0.15;
+  const MAIN_WIDTH = SPINE_WIDTH - 2 * FOLD_WIDTH;
+
+  // load texture
+  const spineTexture = useLoader(TextureLoader, `/textures/spine.jpg`);
+  spineTexture.colorSpace = SRGBColorSpace;
+  spineTexture.wrapS = THREE.ClampToEdgeWrapping;
+  spineTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+  // materials
+  const materials = useMemo(() => {
+    const base = {
+      roughness: 0.3,
+      depthWrite: true,
+      depthTest: true,
+    };
+    return [
+      new MeshStandardMaterial({ ...base, color: coverColor }),
+      new MeshStandardMaterial({ ...base, map: spineTexture, color: coverColor }),
+    ];
+  }, [spineTexture]);
+
+  useFrame((_, delta) => {
+    if (!spineGroupRef.current) return;
+    // compute foldAngle…
+    const q = totalPages / 4;
+    const tq = (3 * totalPages) / 4;
+    let foldAngle = 0;
+    if (currentPage <= q) foldAngle = (currentPage / q) * (Math.PI / 3);
+    else if (currentPage < tq) foldAngle = Math.PI / 3;
+    else foldAngle = ((totalPages - currentPage) / (totalPages - tq)) * (Math.PI / 3);
+
+    // positions & rotations…
+    const spinePos = new THREE.Vector3(
+      bookClosed || currentPage === 1 || currentPage === totalPages - 1 ? 0 : (currentPage < totalPages/2 ? -0.01 : -0.01),
+      0,
+      -SPINE_WIDTH / 2
+    );
+
+    // main rotation
+    const mainRot = bookClosed
+      ? new THREE.Euler(0, Math.PI/2, 0)
+      : new THREE.Euler(0, 0, 0);
+
+    // apply folds
+    if (!bookClosed) {
+      spineLeftFoldRef.current.rotation.y = -foldAngle;
+      spineRightFoldRef.current.rotation.y = foldAngle;
+    } else {
+      spineLeftFoldRef.current.rotation.y = 0;
+      spineRightFoldRef.current.rotation.y = 0;
+    }
+
+    // damp transforms
+    easing.damp3(spineGroupRef.current.position, spinePos, easingFactor, delta);
+    easing.dampE(spineMainRef.current.rotation, mainRot, easingFactor, delta);
+
+    // optional group rotation
+    if (!bookClosed) {
+      const fullRot = -Math.PI * (currentPage / totalPages);
+      easing.dampE(spineGroupRef.current.rotation, new THREE.Euler(0, fullRot, 0), easingFactor, delta);
+    }
+  });
+
+  return (
+    <group ref={spineGroupRef} >
+
+      {/* visible cover‑thick spine */}
+      <mesh ref={spineMainRef} castShadow receiveShadow>
+        <boxGeometry args={[MAIN_WIDTH, SPINE_HEIGHT, SPINE_DEPTH]} />
+        <meshStandardMaterial map={spineTexture} roughness={0.3} color={coverColor} />
+        {/* left fold */}
+        <group ref={spineLeftFoldRef} position={[-MAIN_WIDTH/2,0,0]}>
+          <mesh position={[-FOLD_WIDTH/2,0,0]} castShadow receiveShadow>
+            <boxGeometry args={[FOLD_WIDTH, SPINE_HEIGHT, SPINE_DEPTH]} />
+            <meshStandardMaterial roughness={0.3} color={coverColor} />
+          </mesh>
+        </group>
+        {/* right fold */}
+        <group ref={spineRightFoldRef} position={[MAIN_WIDTH/2,0,0]}>
+          <mesh position={[FOLD_WIDTH/2,0,0]} castShadow receiveShadow>
+            <boxGeometry args={[FOLD_WIDTH, SPINE_HEIGHT, SPINE_DEPTH]} />
+            <meshStandardMaterial roughness={0.3} color={coverColor} />
+          </mesh>
+        </group>
+      </mesh>
+    </group>
+  );
+};
+
+
+// Cover component (for both front and back)
+// Cover component (for both front and back)
+const Cover = ({ isBackCover, bookClosed, currentPage, totalPages, ...props }) => {
+  const coverRef = useRef();
+  const pivotRef = useRef();
+  const spineConnectionRef = useRef(); // Reference for spine connection point
+  const [hovered, setHovered] = useState(false);
+  const [, setPage] = useAtom(pageAtom);
+
+  // Load cover textures
+  const [coverTexture, coverRoughness] = useTexture([
+    `/textures/book-${isBackCover ? "back" : "cover"}.jpg`,
+    `/textures/book-cover-roughness.png`,
+  ]);
+  coverTexture.colorSpace = coverRoughness.colorSpace = SRGBColorSpace;
+
+  // Create cover material
+  const coverMaterial = useMemo(
+    () =>
+      new MeshStandardMaterial({
+        color: coverColor,
+        map: coverTexture,
+        roughness: 0.2,
+        emissive: emissiveColor,
+        emissiveIntensity: 0,
+      }),
+    [coverTexture, coverRoughness]
   );
 
-  // Spine Texture Handling
-  const spineTexture = useLoader(TextureLoader, [`/textures/DSC02069.jpg`]);
-  spineTexture[0].colorSpace = SRGBColorSpace;
-  spineTexture[0].wrapS = THREE.ClampToEdgeWrapping;
-  spineTexture[0].wrapT = THREE.ClampToEdgeWrapping;
-  spineTexture[0].repeat.set(1, 1);  // Stretch to full width & height
-  spineTexture[0].offset.set(0, 0);  // Center the texture
+  const innerMaterial = useMemo(
+    () =>
+      new MeshStandardMaterial({
+        color: coverColor,
+        roughness: 0.2,
+        emissive: emissiveColor,
+        emissiveIntensity: 0,
+      }),
+    []
+  );
 
-  const spineMaterial = new MeshStandardMaterial({
-    map: spineTexture[0]
+  // Create skinned mesh
+  const coverMesh = useMemo(() => {
+    const bones = [];
+    for (let i = 0; i <= PAGE_SEGMENTS; i++) {
+      const bone = new Bone();
+      bones.push(bone);
+      bone.position.x = i === 0 ? 0 : SEGMENT_WIDTH;
+      if (i > 0) {
+        bones[i - 1].add(bone);
+      }
+    }
+    const skeleton = new Skeleton(bones);
+
+    const materials = [
+      innerMaterial, // left
+      innerMaterial, // right
+      innerMaterial, // top
+      innerMaterial, // bottom
+      isBackCover ? coverMaterial : innerMaterial, // back
+      isBackCover ? innerMaterial : coverMaterial, // front
+    ];
+
+    const mesh = new SkinnedMesh(coverGeometry, materials);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+
+    mesh.add(skeleton.bones[0]);
+    mesh.bind(skeleton);
+    return mesh;
+  }, [coverMaterial, innerMaterial, isBackCover]);
+
+  // Spine width for positioning
+  const SPINE_WIDTH = PAGE_DEPTH * (totalPages - 2);
+  const FOLD_WIDTH = SPINE_WIDTH * 0.15; // Match with SpineFolded component
+
+  useFrame((_, delta) => {
+    if (!coverRef.current || !pivotRef.current) return;
+
+    // Normalized progress
+    const normalizedProgress = currentPage / (totalPages - 2);
+
+    let targetPosition, targetRotation;
+    if (bookClosed) {
+      // Covers are flat
+      targetPosition = new THREE.Vector3(
+        0,
+        0,
+        isBackCover ? 0 : -SPINE_WIDTH
+      );
+      targetRotation = 0;
+    } else {
+      // Book open
+      const coverSpread = SPINE_WIDTH / 2;
+      const angularSpread = Math.PI / 2;
+      const halfProgress = normalizedProgress * 2;
+
+      if (currentPage <= Math.floor((pages.length - 2) / 2)) {
+        // front half
+        targetRotation = isBackCover ? -angularSpread : angularSpread;
+        targetPosition = new THREE.Vector3(
+          isBackCover
+            ? SPINE_WIDTH / 2 - coverSpread * halfProgress
+            : -SPINE_WIDTH / 2 + coverSpread * halfProgress,
+          0,
+          isBackCover ? coverSpread * halfProgress - SPINE_WIDTH / 2 : -coverSpread * halfProgress - SPINE_WIDTH / 2
+        );
+      } else {
+        // back half
+        targetRotation = isBackCover ? -angularSpread : angularSpread;
+        targetPosition = new THREE.Vector3(
+          isBackCover
+            ? SPINE_WIDTH / 2 - coverSpread * halfProgress
+            : -SPINE_WIDTH / 2 + coverSpread * halfProgress,
+          0,
+          isBackCover
+            ? SPINE_WIDTH - coverSpread * halfProgress - SPINE_WIDTH / 2
+            : -SPINE_WIDTH + coverSpread * halfProgress - SPINE_WIDTH / 2
+        );
+      }
+    }
+
+    // Set the spine connection point position for better connection
+    if (spineConnectionRef.current) {
+      const edgePosition = isBackCover ? -PAGE_WIDTH * RATIO : PAGE_WIDTH * RATIO;
+      spineConnectionRef.current.position.x = edgePosition;
+    }
+
+    easing.damp3(coverRef.current.position, targetPosition, bookClosed ? 0.05 : easingFactor, delta);
+    easing.dampAngle(
+      pivotRef.current.rotation,
+      "y",
+      targetRotation,
+      bookClosed ? 0.05 : easingFactor,
+      delta
+    );
   });
-  return <mesh geometry={spineGeometry} material={spineMaterial} position={[0, 0, -(totalPage- page) * PAGE_DEPTH / 2]} rotation={[0, Math.PI/2, 0]}/>
-}
 
+  return (
+    <group {...props} ref={coverRef}>
+      <group ref={pivotRef}>
+        <primitive
+          object={coverMesh}
+          onPointerEnter={() => setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setPage(isBackCover ? totalPages : 0);
+            setHovered(false);
+          }}
+        />
+        {/* Spine connection point */}
+        <group
+          ref={spineConnectionRef}
+          position={[isBackCover ? -PAGE_WIDTH * RATIO : PAGE_WIDTH * RATIO, 0, 0]}
+        />
+      </group>
+    </group>
+  );
+};
 
 const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
-  const iscover = number === 0 || number === pages.length - 1;
   // Load textures inside the component
   const [picture, picture2, ...[pictureRoughness]] = useTexture([
     `/textures/${front}.jpg`,
     `/textures/${back}.jpg`,
-    ...(number === 0 || number === pages.length - 1 ? [`/textures/book-cover-roughness.jpg`] : [])
+    ...(number === 0 || number === pages.length - 1 ? [`/textures/book-cover-roughness.png`] : [])
   ]);
 
   picture.colorSpace = picture2.colorSpace = SRGBColorSpace;
-
-  // Get the spine texture inside the component
-  // const spineTexture = useTexture(`/textures/Red.jpg`, undefined, (error) => {
-  //   console.error("Spine texture error:", error);
-  // });
-
-  // const spineTexture = useLoader(TextureLoader, [`/textures/spine.jpg`]);
-  // spineTexture[0].colorSpace = SRGBColorSpace;
-  // spineTexture[0].wrapS = THREE.ClampToEdgeWrapping;
-  // spineTexture[0].wrapT = THREE.ClampToEdgeWrapping;
-
-  // // Scale the image to fit exactly within the spine area
-  // spineTexture[0].repeat.set(1, 1);  // Stretch to full width & height
-  // spineTexture[0].offset.set(0, 0);  // Center the texture
 
 
   const group = useRef();
@@ -192,7 +396,7 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
       })
     ];
 
-    const selectedGeometry = (iscover) ? coverGeometry : pageGeometry;
+    const selectedGeometry = pageGeometry;
     const mesh = new Mesh(selectedGeometry, materials);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -253,7 +457,7 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
   });
 
   return (
-    <group {...props} ref={group} rotation-y={opened ? -Math.PI : 0}
+    <group {...props} ref={group}
       onPointerEnter={(e) => {
         e.stopPropagation();
         setHighlighted(true);
@@ -278,61 +482,106 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
 };
 
 export const RigidBook = ({ ...props }) => {
-  const [page] = useAtom(pageAtom);
-  const [delayedPage, setDelayedPage] = useState(page);
+  const [page] = useAtom(pageAtom)
+  const [delayedPage, setDelayedPage] = useState(page)
+  const totalPages = pages.length
+  const bookRef = useRef()
 
-  // Call preload textures inside the component
+  useEffect(preloadTextures, [])
+
+  // smooth page stepping
   useEffect(() => {
-    try {
-      preloadTextures();
-    } catch (error) {
-      ;
-      console.error("Error preloading textures:", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    let timeout;
-    const goToPage = () => {
-      setDelayedPage((delayedPage) => {
-        if (page === delayedPage) {
-          return delayedPage;
-        } else {
-          timeout = setTimeout(() => {
-            goToPage();
-          }, Math.abs(page - delayedPage) > 2 ? 50 : 150)
-
-          if (page > delayedPage) {
-            return delayedPage + 1;
-          }
-          if (page < delayedPage) {
-            return delayedPage - 1;
-          }
-        }
+    let timeout
+    const step = () => {
+      setDelayedPage(dp => {
+        if (dp === page) return dp
+        timeout = setTimeout(step, Math.abs(page - dp) > 2 ? 50 : 150)
+        return page > dp ? dp + 1 : dp - 1
       })
     }
-
-    goToPage();
-    return () => {
-      clearTimeout(timeout)
-    };
+    step()
+    return () => clearTimeout(timeout)
   }, [page])
+
+  const bookClosed = delayedPage === 0 || delayedPage === totalPages
+
+  //
+  // ——— DYNAMIC OPEN‑BOOK OFFSETS ———
+  //
+  const SPINE_WIDTH = PAGE_DEPTH * (totalPages - 2)
+
+  // these factors control how “wide” and “deep” the open book is
+  const OPEN_X_FACTOR        = 0.6
+  const OPEN_Z_FRONT_FACTOR  = 0.6
+  const OPEN_Z_MIDDLE_FACTOR = 0.3
+  const OPEN_Z_LAST_FACTOR   = 0.45
+
+  const openOffsetX       = SPINE_WIDTH * OPEN_X_FACTOR
+  const openOffsetZFront  = -SPINE_WIDTH * OPEN_Z_FRONT_FACTOR
+  const openOffsetZMiddle = -SPINE_WIDTH * OPEN_Z_MIDDLE_FACTOR
+  const openOffsetZLast   = -SPINE_WIDTH * OPEN_Z_LAST_FACTOR
+
+  let openZ
+  if (delayedPage < totalPages / 2) {
+    openZ = openOffsetZFront
+  } else if (delayedPage === totalPages - 1) {
+    openZ = openOffsetZLast
+  } else {
+    openZ = openOffsetZMiddle
+  }
+
+  const targetPos = bookClosed
+    ? [
+        0,
+        0,
+        delayedPage === totalPages
+          ? -PAGE_DEPTH * (totalPages + 0.05)
+          : -0.001
+      ]
+    : [openOffsetX, 0, openZ]
+
+  const targetRot = bookClosed
+    ? [0, delayedPage === totalPages ? Math.PI : 0, 0]
+    : [0, Math.PI / 2, 0]
+
+  useFrame((_, delta) => {
+    if (!bookRef.current) return
+    easing.damp3(bookRef.current.position, targetPos, easingFactor, delta)
+    easing.dampE(bookRef.current.rotation, targetRot, easingFactor, delta)
+  })
 
   return (
     <group {...props}>
       <group>
-        <Spine totalPage={pages.length} page={delayedPage}/>
-        <Spine totalPage={page} page={page - delayedPage}/>
-        {[...pages].map((pageData, index) => (
-          <Page
-            key={index}
-            page={delayedPage}
-            number={index}
-            opened={delayedPage > index}
-            bookClosed={delayedPage === 0 || delayedPage === pages.length}
-            {...pageData}
-          />
-        ))}
+        <Cover
+          isBackCover={false}
+          bookClosed={bookClosed}
+          currentPage={delayedPage}
+          totalPages={totalPages}
+        />
+        <SpineFolded
+          totalPages={totalPages}
+          currentPage={delayedPage}
+          bookClosed={bookClosed}
+        />
+        <group ref={bookRef} >
+          {[...pages].slice(1, -1).map((p, i) => (
+            <Page
+              key={i}
+              page={delayedPage}
+              number={i + 1}
+              opened={delayedPage > i + 1}
+              bookClosed={bookClosed}
+              {...p}
+            />
+          ))}
+        </group>
+        <Cover
+          isBackCover={true}
+          bookClosed={bookClosed}
+          currentPage={delayedPage}
+          totalPages={totalPages}
+        />
       </group>
     </group>
   )

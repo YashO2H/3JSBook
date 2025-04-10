@@ -1,5 +1,5 @@
 import { useCursor, useTexture } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useLoader } from "@react-three/fiber";
 import { useAtom } from "jotai";
 import { easing } from "maath";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,12 +12,13 @@ import {
   MeshStandardMaterial,
   Skeleton,
   SkinnedMesh,
-  SRGBColorSpace,
+  TextureLoader,
   Uint16BufferAttribute,
   Vector3,
 } from "three";
 import { degToRad } from "three/src/math/MathUtils.js";
 import { pageAtom, pages } from "./UI";
+import * as THREE from "three" 
 
 const easingFactor = 0.5; // Controls the speed of the easing
 const easingFactorFold = 0.3; // Controls the speed of the easing
@@ -28,44 +29,55 @@ const turningCurveStrength = 0.09; // Controls the strength of the curve
 const PAGE_WIDTH = 1.28;
 const PAGE_HEIGHT = 1.71; // 4:3 aspect ratio
 const PAGE_DEPTH = 0.003;
+const COVER_DEPTH = 0.009;
 const PAGE_SEGMENTS = 30;
+const RATIO = 1.05;
 const SEGMENT_WIDTH = PAGE_WIDTH / PAGE_SEGMENTS;
 
-const pageGeometry = new BoxGeometry(
-  PAGE_WIDTH,
-  PAGE_HEIGHT,
-  PAGE_DEPTH,
-  PAGE_SEGMENTS,
-  2
-);
+const createPageGeometry = (depth = PAGE_DEPTH, isCover) => {
+    const width = isCover ? PAGE_WIDTH / RATIO   : PAGE_WIDTH;
+    const height = isCover ? PAGE_HEIGHT / RATIO  : PAGE_HEIGHT;
+    const pageGeometry = new BoxGeometry(
+      width,
+      height,
+      depth,
+      PAGE_SEGMENTS,
+      2
+    );
+    
+    pageGeometry.translate(width / 2, 0, 0);
+    
+    const position = pageGeometry.attributes.position;
+    const vertex = new Vector3();
+    const skinIndexes = [];
+    const skinWeights = [];
+    
+    for (let i = 0; i < position.count; i++) {
+      // ALL VERTICES
+      vertex.fromBufferAttribute(position, i); // get the vertex
+      const x = vertex.x; // get the x position of the vertex
+    
+      const skinIndex = Math.max(0, Math.floor(x / SEGMENT_WIDTH)); // calculate the skin index
+      let skinWeight = (x % SEGMENT_WIDTH) / SEGMENT_WIDTH; // calculate the skin weight
+    
+      skinIndexes.push(skinIndex, skinIndex + 1, 0, 0); // set the skin indexes
+      skinWeights.push(1 - skinWeight, skinWeight, 0, 0); // set the skin weights
+    }
+    
+    pageGeometry.setAttribute(
+      "skinIndex",
+      new Uint16BufferAttribute(skinIndexes, 4)
+    );
+    pageGeometry.setAttribute(
+      "skinWeight",
+      new Float32BufferAttribute(skinWeights, 4))
 
-pageGeometry.translate(PAGE_WIDTH / 2, 0, 0);
-
-const position = pageGeometry.attributes.position;
-const vertex = new Vector3();
-const skinIndexes = [];
-const skinWeights = [];
-
-for (let i = 0; i < position.count; i++) {
-  // ALL VERTICES
-  vertex.fromBufferAttribute(position, i); // get the vertex
-  const x = vertex.x; // get the x position of the vertex
-
-  const skinIndex = Math.max(0, Math.floor(x / SEGMENT_WIDTH)); // calculate the skin index
-  let skinWeight = (x % SEGMENT_WIDTH) / SEGMENT_WIDTH; // calculate the skin weight
-
-  skinIndexes.push(skinIndex, skinIndex + 1, 0, 0); // set the skin indexes
-  skinWeights.push(1 - skinWeight, skinWeight, 0, 0); // set the skin weights
+    return pageGeometry;
 }
 
-pageGeometry.setAttribute(
-  "skinIndex",
-  new Uint16BufferAttribute(skinIndexes, 4)
-);
-pageGeometry.setAttribute(
-  "skinWeight",
-  new Float32BufferAttribute(skinWeights, 4)
-);
+// Create geometries
+const pageGeometry = createPageGeometry(PAGE_DEPTH, false);
+const coverGeometry = createPageGeometry(COVER_DEPTH, true);
 
 const whiteColor = new Color("white");
 const emissiveColor = new Color("orange");
@@ -88,18 +100,71 @@ const pageMaterials = [
 pages.forEach((page) => {
   useTexture.preload(`/textures/${page.front}.jpg`);
   useTexture.preload(`/textures/${page.back}.jpg`);
-  useTexture.preload(`/textures/book-cover-roughness.jpg`);
+  useTexture.preload(`/textures/book-cover-roughness.png`);
 });
 
+const Spine = ({totalPage, page, bookClosed}) => {
+  console.log(bookClosed, 'lkasfdlkadsfjlkfdsaljk')
+  // Spine Geometry Dimensions (Custom size for better control)
+  const SPINE_WIDTH = PAGE_DEPTH * (totalPage - 2) + COVER_DEPTH; // Slightly thicker for a realistic look
+  const SPINE_HEIGHT = PAGE_HEIGHT / RATIO;
+  const SPINE_DEPTH = PAGE_DEPTH;
+  const spineRef = useRef();
+
+  // Separate Spine Geometry
+  const spineGeometry = new BoxGeometry(
+    SPINE_WIDTH,     // Width of the spine
+    SPINE_HEIGHT,    // Height (matches page height)
+    SPINE_DEPTH      // Thickness (matches page depth)
+  );
+
+  // Spine Texture Handling
+  const spineTexture = useLoader(TextureLoader, [`/textures/DSC02069.jpg`]);
+  spineTexture[0].colorSpace = THREE.SRGBColorSpace;
+  spineTexture[0].wrapS = THREE.ClampToEdgeWrapping;
+  spineTexture[0].wrapT = THREE.ClampToEdgeWrapping;
+  spineTexture[0].repeat.set(1, 1);  // Stretch to full width & height
+  spineTexture[0].offset.set(0, 0);  // Center the texture
+
+  const spineMaterial = new MeshStandardMaterial({
+    map: spineTexture[0]
+  });
+
+  useFrame((_, delta) => {
+    if(bookClosed){
+      easing.damp3(spineRef.current.position, new THREE.Vector3(-SPINE_WIDTH/2 , 0, 0), easingFactor, delta)
+      easing.dampE(
+        spineRef.current.rotation,
+        new THREE.Euler(0, page == pages.length ? Math.PI:0, 0),
+        easingFactor,
+        delta
+    )
+    }else{
+      spineRef.current.position.z = -(totalPage/2) * PAGE_DEPTH + page * PAGE_DEPTH
+      spineRef.current.position.x = -0.005
+        easing.dampE(
+        spineRef.current.rotation,
+        new THREE.Euler(0, -Math.PI / 2, 0),
+        easingFactor,
+        delta
+    )
+    }
+
+  })
+
+  return <mesh ref= {spineRef} geometry={spineGeometry} material={spineMaterial} />
+}
+
 const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
+  const isCover = number ===  0 || number === pages.length - 1
   const [picture, picture2, pictureRoughness] = useTexture([
     `/textures/${front}.jpg`,
     `/textures/${back}.jpg`,
     ...(number === 0 || number === pages.length - 1
-      ? [`/textures/book-cover-roughness.jpg`]
+      ? [`/textures/book-cover-roughness.png`]
       : []),
   ]);
-  picture.colorSpace = picture2.colorSpace = SRGBColorSpace;
+  picture.colorSpace = picture2.colorSpace = THREE.SRGBColorSpace;
   const group = useRef();
   const turnedAt = useRef(0);
   const lastOpened = useRef(opened);
@@ -151,7 +216,7 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
         emissiveIntensity: 0,
       }),
     ];
-    const mesh = new SkinnedMesh(pageGeometry, materials);
+    const mesh = new SkinnedMesh(isCover? coverGeometry:pageGeometry, materials);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
@@ -184,8 +249,10 @@ const Page = ({ number, front, back, page, opened, bookClosed, ...props }) => {
 
     let targetRotation = opened ? -Math.PI / 2 : Math.PI / 2;
     if (!bookClosed) {
-      targetRotation += degToRad(number * 0.8);
-    }
+      const middleIndex = (pages.length - 1) / 2;
+      const offsetFromMiddle = number - middleIndex;
+      targetRotation += degToRad(offsetFromMiddle * 0.6);
+  }
 
     const bones = skinnedMeshRef.current.skeleton.bones;
     for (let i = 0; i < bones.length; i++) {
@@ -296,6 +363,7 @@ export const SoftBook = ({ ...props }) => {
 
   return (
     <group {...props} rotation-y={-Math.PI / 2}>
+      <Spine totalPage={pages.length} page={delayedPage} bookClosed={page === 0 || page === pages.length}/>
       {[...pages].map((pageData, index) => (
         <Page
           key={index}
