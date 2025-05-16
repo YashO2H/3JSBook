@@ -1,5 +1,5 @@
 import { useCursor, useTexture } from "@react-three/drei";
-import { useFrame, useLoader } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useAtom } from "jotai";
 import { easing } from "maath";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,14 +12,14 @@ import {
   MeshStandardMaterial,
   Skeleton,
   SkinnedMesh,
-  TextureLoader,
+  SRGBColorSpace,
   Uint16BufferAttribute,
   Vector3,
 } from "three";
 import { degToRad } from "three/src/math/MathUtils.js";
-import { getPages, pageAtom } from "./UI";
-import * as THREE from "three" 
+import { getPages, pageAtom, pages } from "./UI";
 import { svgStringToPngBlobUrl } from "./HelperFunction";
+import * as THREE from "three" 
 
 const easingFactor = 0.5; // Controls the speed of the easing
 const easingFactorFold = 0.3; // Controls the speed of the easing
@@ -27,19 +27,18 @@ const insideCurveStrength = 0.18; // Controls the strength of the curve
 const outsideCurveStrength = 0.05; // Controls the strength of the curve
 const turningCurveStrength = 0.09; // Controls the strength of the curve
 
-const PAGE_DEPTH = 0.001;
 const PAGE_SEGMENTS = 30;
 
 const TRANSPARENT_PX =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
 
-const createPageGeometry = (depth = PAGE_DEPTH, PAGE_WIDTH, PAGE_HEIGHT, COVER_WIDTH, COVER_HEIGTH, SEGMENT_WIDTH, isCover) => {
+const createPageGeometry = (PAGE_DEPTH,COVER_DEPTH, PAGE_WIDTH, PAGE_HEIGHT, COVER_WIDTH, COVER_HEIGTH, SEGMENT_WIDTH, isCover) => {
     const width = isCover ? COVER_WIDTH  : PAGE_WIDTH;
     const height = isCover ? COVER_HEIGTH  : PAGE_HEIGHT;
     const pageGeometry = new BoxGeometry(
       width,
       height,
-      depth,
+      isCover?COVER_DEPTH: PAGE_DEPTH,
       PAGE_SEGMENTS,
       2
     );
@@ -74,95 +73,51 @@ const createPageGeometry = (depth = PAGE_DEPTH, PAGE_WIDTH, PAGE_HEIGHT, COVER_W
     return pageGeometry;
 }
 
+const whiteColor = new Color("white");
+const emissiveColor = new Color("orange");
 
-const Spine = ({totalPage, page, bookClosed,PAGE_DEPTH,COVER_HEIGTH,COVER_DEPTH}) => {
-  // Spine Geometry Dimensions (Custom size for better control)
-  const SPINE_WIDTH = PAGE_DEPTH * (totalPage); // Slightly thicker for a realistic look
-  const SPINE_HEIGHT = COVER_HEIGTH;
-  const SPINE_DEPTH = PAGE_DEPTH;
-  const spineRef = useRef();
 
-  // Separate Spine Geometry
-  const spineGeometry = new BoxGeometry(
-    SPINE_WIDTH,     // Width of the spine
-    SPINE_HEIGHT,    // Height (matches page height)
-    SPINE_DEPTH      // Thickness (matches page depth)
-  );
+const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGeometry, coverGeometry,SPINE_WIDTH,PAGE_DEPTH, SEGMENT_WIDTH, ...props }) => {
+   const isCover = number ===  0 || number === totalPages - 1
+    const [pngUrl, setPngUrl] = useState(null);
+    const [pngUrl1, setPngUrl1] = useState(null);
+    const [ready, setReady] = useState(false);
+    
+    useEffect(() => {
+      (async () => {
+        const frontUrl = await svgStringToPngBlobUrl(pageImages.front, 512, 512);
+        const backUrl = await svgStringToPngBlobUrl(pageImages.back, 512, 512);
+        setPngUrl(frontUrl);
+        setPngUrl1(backUrl);
+        setReady(true);
+      })();
+    }, []);
+    
+    const picture = useTexture(ready ? pngUrl : TRANSPARENT_PX);
+    const picture2 = useTexture(ready ? pngUrl1 : TRANSPARENT_PX);
+    picture.colorSpace = picture2.colorSpace = THREE.SRGBColorSpace;
+    const group = useRef();
+    const turnedAt = useRef(0);
+    const lastOpened = useRef(opened);
 
-  // Spine Texture Handling
-  // const spineTexture = useLoader(TextureLoader, [`/textures/DSC02069.jpg`]);
-  // spineTexture[0].colorSpace = THREE.SRGBColorSpace;
-  // spineTexture[0].wrapS = THREE.ClampToEdgeWrapping;
-  // spineTexture[0].wrapT = THREE.ClampToEdgeWrapping;
-  // spineTexture[0].repeat.set(1, 1);  // Stretch to full width & height
-  // spineTexture[0].offset.set(0, 0);  // Center the texture
+    const skinnedMeshRef = useRef();
+    const pageMaterials = [
+      new MeshStandardMaterial({
+        color: whiteColor,
+      }),
+      new MeshStandardMaterial({
+        color: "#111",
+      }),
+      new MeshStandardMaterial({
+        color: whiteColor,
+      }),
+      new MeshStandardMaterial({
+        color: whiteColor,
+      }),
+    ];
 
-  const spineMaterial = new MeshStandardMaterial({
-    color: 'red'
-  });
-
-  useFrame((_, delta) => {
-    if(bookClosed){
-      easing.damp3(spineRef.current.position, new THREE.Vector3(-SPINE_WIDTH/2+0.001 , 0, 0), easingFactor, delta)
-      easing.dampE(
-        spineRef.current.rotation,
-        new THREE.Euler(0, page == totalPage ? Math.PI:0, 0),
-        easingFactor,
-        delta
-    )
-    }else{
-      spineRef.current.position.z = -(totalPage/2) * PAGE_DEPTH + page * PAGE_DEPTH
-      spineRef.current.position.x = -0.001
-        easing.dampE(
-        spineRef.current.rotation,
-        new THREE.Euler(0, -Math.PI / 2, 0),
-        easingFactor,
-        delta
-    )
-    }
-
-  })
-
-  return <mesh ref= {spineRef} geometry={spineGeometry} material={spineMaterial} />
-}
-
-const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGeometry, coverGeometry, SEGMENT_WIDTH }) => {
-  const isCover = number ===  0 || number === totalPages - 1
-  const [pngUrl, setPngUrl] = useState(null);
-  const [pngUrl1, setPngUrl1] = useState(null);
-  const [ready, setReady] = useState(false);
-  
-  useEffect(() => {
-    (async () => {
-      const frontUrl = await svgStringToPngBlobUrl(pageImages.front, 512, 512);
-      const backUrl = await svgStringToPngBlobUrl(pageImages.back, 512, 512);
-      setPngUrl(frontUrl);
-      setPngUrl1(backUrl);
-      setReady(true);
-    })();
-  }, []);
-  
-  const picture = useTexture(ready ? pngUrl : TRANSPARENT_PX);
-  const picture2 = useTexture(ready ? pngUrl1 : TRANSPARENT_PX);
-  picture.colorSpace = picture2.colorSpace = THREE.SRGBColorSpace;
-  const group = useRef();
-  const turnedAt = useRef(0);
-  const lastOpened = useRef(opened);
-
-  const skinnedMeshRef = useRef();
-
-  const pageMaterials = useMemo(
-    () => [
-      new MeshStandardMaterial({ color: '#ffffff' }),
-      new MeshStandardMaterial({ color: '#ffffff' }),
-      new MeshStandardMaterial({ color: '#ffffff' }),
-      new MeshStandardMaterial({ color: '#ffffff' }),
-    ],
-    []
-  )
-
-  const manualSkinnedMesh = useMemo(() => {
-    const bones = [];
+    const manualSkinnedMesh = useMemo(() => {
+        const bones = [];
     for (let i = 0; i <= PAGE_SEGMENTS; i++) {
       let bone = new Bone();
       bones.push(bone);
@@ -195,6 +150,7 @@ const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGe
     return mesh;
   }, [picture, picture2]);
 
+  // useHelper(skinnedMeshRef, SkeletonHelper, "red");
 
   useFrame((_, delta) => {
     if (!skinnedMeshRef.current) {
@@ -218,10 +174,8 @@ const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGe
 
     let targetRotation = opened ? -Math.PI / 2 : Math.PI / 2;
     if (!bookClosed) {
-      const middleIndex = totalPages / 2;
-      const offsetFromMiddle = number - middleIndex;
-      targetRotation += degToRad(offsetFromMiddle * 0.6);
-  }
+      targetRotation += degToRad(number * 0.8);
+    }
 
     const bones = skinnedMeshRef.current.skeleton.bones;
     for (let i = 0; i < bones.length; i++) {
@@ -270,12 +224,10 @@ const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGe
   const [_, setPage] = useAtom(pageAtom);
   const [highlighted, setHighlighted] = useState(false);
   useCursor(highlighted);
-
-
   if (!picture) return null;
-
   return (
     <group
+      {...props}
       ref={group}
       onPointerEnter={(e) => {
         e.stopPropagation();
@@ -283,6 +235,11 @@ const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGe
       }}
       onPointerLeave={(e) => {
         e.stopPropagation();
+        setHighlighted(false);
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        setPage(opened ? number : number + 1);
         setHighlighted(false);
       }}
     >
@@ -295,80 +252,85 @@ const Page = ({ number, page, opened, bookClosed, totalPages, pageImages, pageGe
   );
 };
 
-export const SoftBook = ({ pageImages = [],
-  pageWidth,
-  pageHeight,
-  pageDepth,
-  coverHeight,
-  coverWidth,
-  nextPage }) => {
+export const Soft = ({pageImages = [],
+    pageWidth,
+    pageHeight,
+    coverHeight,
+    coverWidth,
+    pageDepth,
+    coverDepth,
+    spineWidth,
+    nextPage,
+    ...props }) => {
   const [page] = useAtom(pageAtom)
     const [delayedPage, setDelayedPage] = useState(page)
     const spine = pageImages[pageImages.length - 1]; 
     const pages = getPages(pageImages.slice(0, -1)); 
+    DnBConsole.log(pages, "what are the pages")
     const totalPages = pages?.length || 0
     const PAGE_WIDTH = pageWidth
     const PAGE_HEIGHT = pageHeight
     const COVER_WIDTH = coverWidth
     const COVER_HEIGTH = coverHeight
-    const COVER_DEPTH = 0.001
     const SEGMENT_WIDTH = COVER_WIDTH / PAGE_SEGMENTS
     const [_, setPage] = useAtom(pageAtom);
-
+    const PAGE_DEPTH = pageDepth
+    const COVER_DEPTH = coverDepth
     useEffect(() => {
-      setPage(nextPage);
+    setPage(nextPage);
     }, [nextPage, setPage]);
 
-  useEffect(() => {
+useEffect(() => {
     let timeout;
     const goToPage = () => {
-      setDelayedPage((delayedPage) => {
+    setDelayedPage((delayedPage) => {
         if (page === delayedPage) {
-          return delayedPage;
+        return delayedPage;
         } else {
-          timeout = setTimeout(
+        timeout = setTimeout(
             () => {
-              goToPage();
+            goToPage();
             },
             Math.abs(page - delayedPage) > 2 ? 50 : 150
-          );
-          if (page > delayedPage) {
+        );
+        if (page > delayedPage) {
             return delayedPage + 1;
-          }
-          if (page < delayedPage) {
-            return delayedPage - 1;
-          }
         }
-      });
+        if (page < delayedPage) {
+            return delayedPage - 1;
+        }
+        }
+    });
     };
     goToPage();
     return () => {
-      clearTimeout(timeout);
+    clearTimeout(timeout);
     };
-  }, [page]);
+}, [page]);
 
-  // Create geometries
-  const pageGeometry = createPageGeometry(PAGE_DEPTH, PAGE_WIDTH, PAGE_HEIGHT, COVER_WIDTH, COVER_HEIGTH, SEGMENT_WIDTH, false)
-  const coverGeometry = createPageGeometry(COVER_DEPTH, PAGE_WIDTH, PAGE_HEIGHT, COVER_WIDTH, COVER_HEIGTH, SEGMENT_WIDTH, true)
-  const bookClosed = delayedPage === 0 || delayedPage === totalPages
+// Create geometries
+const pageGeometry = createPageGeometry(PAGE_DEPTH, COVER_DEPTH,PAGE_WIDTH, PAGE_HEIGHT, COVER_WIDTH, COVER_HEIGTH, SEGMENT_WIDTH, false)
+const coverGeometry = createPageGeometry(PAGE_DEPTH,COVER_DEPTH, PAGE_WIDTH, PAGE_HEIGHT, COVER_WIDTH, COVER_HEIGTH, SEGMENT_WIDTH, true)
+const bookClosed = delayedPage === 0 || delayedPage === totalPages
 
   return (
-    <group rotation-y={-Math.PI / 2}>
-      <Spine totalPage={totalPages} page={delayedPage} bookClosed={page === 0 || page === pages.length} COVER_DEPTH={COVER_DEPTH} PAGE_DEPTH={PAGE_DEPTH} COVER_HEIGTH={COVER_HEIGTH}/>
+    <group {...props} rotation-y={-Math.PI / 2}>
       {pages.map((pageData, index) => (
         <Page
-          key={index}
-          page={delayedPage}
-          number={index}
-          pageGeometry={pageGeometry}
-          coverGeometry={coverGeometry}
-          opened={delayedPage > index}
-          bookClosed={bookClosed}
-          totalPages={totalPages}
-          pageImages={pageData}
-          SEGMENT_WIDTH={SEGMENT_WIDTH}
-          {...pageData}
-        />
+            key={index}
+            page={delayedPage}
+            number={index}
+            pageGeometry={pageGeometry}
+            coverGeometry={coverGeometry}
+            opened={delayedPage > index}
+            bookClosed={bookClosed}
+            totalPages={totalPages}
+            pageImages={pageData}
+            SEGMENT_WIDTH={SEGMENT_WIDTH}
+            SPINE_WIDTH={spineWidth}
+            PAGE_DEPTH={PAGE_DEPTH}
+            {...pageData}
+      />
       ))}
     </group>
   );

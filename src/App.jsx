@@ -9,7 +9,7 @@ function App() {
     <>
       <UI />
       <Loader />
-      <Canvas shadows gl={{ antialias:true}} camera={{ position: [-0.5, 1, 4], fov: 45 }}>
+      <Canvas style={{backgroundColor: "white"}} shadows gl={{ antialias:true}} camera={{ position: [-0.5, 1, 4], fov: 45 }}>
         <group position-y={0}>
           <Suspense fallback={null}>
             <Experience />
