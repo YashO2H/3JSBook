@@ -639,11 +639,10 @@ export const Book = ({ pageImages = [],         // ← destructured here
     const spine = pageImages[pageImages.length - 1];
     const frontCover = pageImages[0]
     const frontCoverInner = pageImages[1]
-    const backCover = pageImages[pageImages.length - 2]
-    const backCoverInner = pageImages[pageImages.length - 3]
-    const pages = getPages(pageImages.slice(2, -3), true);
+    const backCover = pageImages[pageImages.length - 1]
+    const backCoverInner = pageImages[pageImages.length - 2]
+    const pages = getPages(pageImages.slice(2, -2), true);
     const totalPages = pages?.length || 0
-    DnBConsole.log(pageImages.length, totalPages, "kitne hai pages")  
     const PAGE_WIDTH = pageWidth
     const PAGE_HEIGHT = pageHeight
     const COVER_WIDTH = coverWidth

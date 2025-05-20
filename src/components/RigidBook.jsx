@@ -502,9 +502,9 @@ export const RigidBook = ({ pageImages = [],         // ← destructured here
   const spine = pageImages[pageImages.length - 1];
   const frontCover = pageImages[0]
   const frontCoverInner = pageImages[1]
-  const backCover = pageImages[pageImages.length - 2]
-  const backCoverInner = pageImages[pageImages.length - 3]
-  const pages = getPages(pageImages.slice(2, -3), true);
+  const backCover = pageImages[pageImages.length - 1]
+  const backCoverInner = pageImages[pageImages.length - 2]
+  const pages = getPages(pageImages.slice(2, -2), true);
   const totalPages = pages?.length || 0
   const PAGE_WIDTH = pageWidth
   const PAGE_HEIGHT = pageHeight
@@ -585,8 +585,8 @@ export const RigidBook = ({ pageImages = [],         // ← destructured here
       0,
       0,
       delayedPage === totalPages
-        ? -PAGE_DEPTH * (totalPages + 0.05)
-        : -0.001
+        ? -PAGE_DEPTH * (totalPages)
+        : 0
     ]
     : [openOffsetX, 0, openZ]
 
@@ -628,31 +628,32 @@ export const RigidBook = ({ pageImages = [],         // ← destructured here
           PAGE_WIDTH={PAGE_WIDTH}
           SPINE_WIDTH={spineWidth}
         />
-        <group ref={bookRef}>
-          {pages.map((pageData, index) => {
-            // Determine visibility for the first and last pages
-            const isVisible = !(index === 0 || index === pages.length - 1);
+        {/* Inner Pages - with fixed positioning */}
+<group ref={bookRef}>
+    {pages.slice(1, -1).map((pageData, index) => {
+        // Adjust the index to account for the slice
+        const adjustedIndex = index + 1;
 
-            return (
-              <Page
-                key={index}
+        return (
+            <Page
+                key={adjustedIndex}
                 page={delayedPage}
-                number={index}
-                opened={delayedPage > index}
+                number={adjustedIndex}
+                opened={delayedPage > adjustedIndex}
                 bookClosed={bookClosed}
                 totalPages={totalPages}
                 pageGeometry={pageGeometry}
                 coverGeometry={coverGeometry}
                 pageImages={pageData}
                 SEGMENT_WIDTH={SEGMENT_WIDTH}
+                visible={true} // Always true since we exclude invisible pages
                 SPINE_WIDTH={spineWidth}
                 PAGE_DEPTH={PAGE_DEPTH}
-                visible={isVisible} // Pass visibility here
                 {...pageData}
-              />
-            );
-          })}
-        </group>
+            />
+        );
+    })}
+</group>
         <Cover
           isBackCover={true}
           bookClosed={bookClosed}

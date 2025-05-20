@@ -265,7 +265,7 @@ export const Soft = ({pageImages = [],
   const [page] = useAtom(pageAtom)
     const [delayedPage, setDelayedPage] = useState(page)
     const spine = pageImages[pageImages.length - 1]; 
-    const pages = getPages(pageImages.slice(0, -1)); 
+    const pages = getPages(pageImages); 
     DnBConsole.log(pages, "what are the pages")
     const totalPages = pages?.length || 0
     const PAGE_WIDTH = pageWidth
